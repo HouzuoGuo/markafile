@@ -1,7 +1,8 @@
 #!/usr/bin/python
 import argparse, textwrap, sqlite3, os, sys, signal
+from os import path
 
-MAN = '''
+DESC = '''
 markafile - all-in-one solution for file tagging
 '''
 
@@ -15,7 +16,7 @@ def disconnect():
             db.close()
             sys.stderr.write('Database "{0}" has been disconnected\n'.format(db_path))
     except sqlite3.Error as err:
-        sys.stderr.write('Unable to disconnect database "{db}", error: "{err}"\n'.format(**{'db': str(db_path), 'err': str(err)}))
+        sys.stderr.write('Unable to disconnect database "{0}", error: "{1}"\n'.format(str(db_path), str(err)))
         sys.exit(1)
 
 def connect():
@@ -27,30 +28,58 @@ def connect():
         db = sqlite3.connect(db_path)
         sys.stderr.write('Connected to database "{0}"\n'.format(db_path))
     except sqlite3.Error as err:
-        sys.stderr.write('Unable to connect to database "{db}", error: "{err}"\n'.format(**{'db': str(db_path), 'err': str(err)}))
+        sys.stderr.write('Unable to connect to database "{0}", error: "{1}"\n'.format(str(db_path), str(err)))
         sys.exit(1)
 
 def setup_tables():
     cur = db.cursor()
     cur.execute('''CREATE TABLE IF NOT EXISTS TAG (
                      ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                     DIR TEXT NOT NULL,
                      PATH TEXT NOT NULL,
                      TAG TEXT NOT NULL
                    )''')
     cur.execute('''CREATE TABLE IF NOT EXISTS WATCH (
                      ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                     PATH TEXT NOT NULL
+                     DIR TEXT NOT NULL
                    )''')
+    cur.execute('CREATE INDEX IF NOT EXISTS TAG_DIR ON TAG (DIR)')
+    cur.execute('CREATE INDEX IF NOT EXISTS TAG_TAG ON TAG (TAG)')
+    cur.execute('CREATE INDEX IF NOT EXISTS TAG_PATH ON TAG (PATH)')
+    cur.execute('CREATE INDEX IF NOT EXISTS WATCH_DIR ON WATCH (DIR)')
     sys.stderr.write('Tables are setup for DB "{0}"\n'.format(db_path))
     disconnect()
     connect()
     sys.stderr.write('Reconnection completed on DB "{0}"\n'.format(db_path))
 
 def tag(args):
-    pass
+    if not args.files:
+        sys.stderr.write('No files to tag\n')
+        return
+
+    global db
+    for path in args.files:
+        path = os.path.abspath(path)
+        for tag in args.tags.split():
+            sys.stderr.write('Add tag "{0}" to file {1}\n'.format(tag, path))
+            cur = db.cursor()
+            cur.execute('INSERT INTO TAG (DIR, PATH, TAG) VALUES (?, ?, ?)',
+                        (os.path.dirname(path), tag, path))
+        db.commit()
 
 def untag(args):
-    pass
+    if not args.files:
+        sys.stderr.write('No files to untag\n')
+        return
+
+    global db
+    for path in args.files:
+        path = os.path.abspath(path)
+        for tag in args.tags.split():
+            sys.stderr.write('Untag "{0} on file {1}\n'.format(tag, path))
+            cur = db.cursor()
+            cur.execute('DELETE FROM TAG WHERE PATH = ? AND TAG = ?', (path, tag))
+        db.commit()
 
 def tags(args):
     pass
@@ -67,10 +96,12 @@ def unwatch(args):
 def daemon(args):
     pass
 
+# Action names and handler functions
 ACTIONS = {'tag': tag, 'untag': untag, 'tags': tags, 'find': find,
            'watch': watch, 'unwatch': unwatch, 'daemon': daemon}
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=textwrap.dedent(MAN),
+    parser = argparse.ArgumentParser(description=textwrap.dedent(DESC),
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--db', help='tag database path')
     parser.add_argument('action', help='tag/untag/tags/find/watch/unwatch/daemon')
@@ -78,16 +109,23 @@ if __name__ == '__main__':
     parser.add_argument('files', help='files to perform the action on', nargs='*')
     args = parser.parse_args()
     db_path = args.db
+
     # Default database is a hidden file in user's home directory
     if not db_path:
         db_path = os.path.expanduser('~/.markafile.sqlite3')
     signal.signal(signal.SIGTERM, disconnect)
+
+    # Prepare tag database
     connect()
     setup_tables()
+
+    # Execute specified action
     if args.action in ACTIONS:
         ACTIONS[args.action](args)
         disconnect()
         sys.exit(0)
+
+    # If invalid action, exit with status 1
     sys.stderr.write('Unknown action "{0}", try "markafile -h"\n'.format(args.action))
     disconnect()
     sys.exit(1)
