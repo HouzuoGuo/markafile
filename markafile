@@ -7,6 +7,11 @@ markafile - all-in-one solution for file tagging
 '''
 
 db_path, db = None, None
+debug_flag = False
+
+def debug(msg):
+    if debug_flag:
+        sys.stderr.write(msg)
 
 def disconnect():
     global db, db_path
@@ -14,7 +19,7 @@ def disconnect():
         if db:
             db.commit()
             db.close()
-            sys.stderr.write('Database "{0}" has been disconnected\n'.format(db_path))
+            debug('Database "{0}" has been disconnected\n'.format(db_path))
     except sqlite3.Error as err:
         sys.stderr.write('Unable to disconnect database "{0}", error: "{1}"\n'.format(str(db_path), str(err)))
         sys.exit(1)
@@ -26,88 +31,79 @@ def connect():
         sys.exit(1)
     try:
         db = sqlite3.connect(db_path)
-        sys.stderr.write('Connected to database "{0}"\n'.format(db_path))
+        debug('Connected to database "{0}"\n'.format(db_path))
     except sqlite3.Error as err:
-        sys.stderr.write('Unable to connect to database "{0}", error: "{1}"\n'.format(str(db_path), str(err)))
+        sys.stderr.write('Unable to connect to database "{0}", error: "{1}"\n'.format(db_path, str(err)))
         sys.exit(1)
 
 def setup_tables():
-    cur = db.cursor()
-    cur.execute('''CREATE TABLE IF NOT EXISTS TAG (
-                     ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                     DIR TEXT NOT NULL,
-                     PATH TEXT NOT NULL,
-                     TAG TEXT NOT NULL
-                   )''')
-    cur.execute('''CREATE TABLE IF NOT EXISTS WATCH (
-                     ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                     DIR TEXT NOT NULL
-                   )''')
-    cur.execute('CREATE INDEX IF NOT EXISTS TAG_DIR ON TAG (DIR)')
-    cur.execute('CREATE INDEX IF NOT EXISTS TAG_TAG ON TAG (TAG)')
-    cur.execute('CREATE INDEX IF NOT EXISTS TAG_PATH ON TAG (PATH)')
-    cur.execute('CREATE INDEX IF NOT EXISTS WATCH_DIR ON WATCH (DIR)')
-    sys.stderr.write('Tables are setup for DB "{0}"\n'.format(db_path))
-    disconnect()
-    connect()
-    sys.stderr.write('Reconnection completed on DB "{0}"\n'.format(db_path))
+    try:
+        cur = db.cursor()
+        cur.execute('''CREATE TABLE IF NOT EXISTS TAG (
+                         ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                         DIR TEXT NOT NULL,
+                         PATH TEXT NOT NULL,
+                         TAG TEXT NOT NULL
+                       )''')
+        cur.execute('''CREATE TABLE IF NOT EXISTS WATCH (
+                         ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                         DIR TEXT NOT NULL
+                       )''')
+        cur.execute('CREATE INDEX IF NOT EXISTS TAG_DIR ON TAG (DIR)')
+        cur.execute('CREATE INDEX IF NOT EXISTS TAG_TAG ON TAG (TAG)')
+        cur.execute('CREATE INDEX IF NOT EXISTS TAG_PATH ON TAG (PATH)')
+        cur.execute('CREATE INDEX IF NOT EXISTS WATCH_DIR ON WATCH (DIR)')
+        debug('Tables are setup for DB "{0}", reconnecting\n'.format(db_path))
+        disconnect()
+        connect()
+    except sqlite3.Error as err:
+        sys.stderr.write('Unable to complete table setup on DB "{0}", error: "{1}"\n'.format(db_path, str(err)))
+        sys.exit(1)
 
 def tag(args):
-    if not args.files:
-        sys.stderr.write('No files to tag\n')
-        return
-
     global db
-    for path in args.files:
+    for path in set(args.files):
         path = os.path.abspath(path)
-        for tag in args.tags.split():
-            sys.stderr.write('Add tag "{0}" to file {1}\n'.format(tag, path))
+        for tag in set(args.tags.split()):
             cur = db.cursor()
-            cur.execute('INSERT INTO TAG (DIR, PATH, TAG) VALUES (?, ?, ?)',
-                        (os.path.dirname(path), tag, path))
+            cur.execute('SELECT COUNT(*) FROM TAG WHERE PATH = ? AND TAG = ?', (path, tag))
+            if cur.fetchone()[0] > 0:
+                debug('File {0} already has tag {1}\n'.format(path, tag))
+            else:
+                debug('Add tag "{0}" to file {1}\n'.format(tag, path))
+                cur.execute('INSERT INTO TAG (DIR, PATH, TAG) VALUES (?, ?, ?)',
+                            (os.path.dirname(path), path, tag))
         db.commit()
 
 def untag(args):
-    if not args.files:
-        sys.stderr.write('No files to untag\n')
-        return
-
     global db
-    for path in args.files:
+    for path in set(args.files):
         path = os.path.abspath(path)
-        for tag in args.tags.split():
-            sys.stderr.write('Untag "{0} on file {1}\n'.format(tag, path))
+        for tag in set(args.tags.split()):
+            debug('Untag "{0} on file {1}\n'.format(tag, path))
             cur = db.cursor()
             cur.execute('DELETE FROM TAG WHERE PATH = ? AND TAG = ?', (path, tag))
         db.commit()
 
-def tags(args):
-    pass
-
 def find(args):
-    pass
-
-def watch(args):
-    pass
-
-def unwatch(args):
     pass
 
 def daemon(args):
     pass
 
 # Action names and handler functions
-ACTIONS = {'tag': tag, 'untag': untag, 'tags': tags, 'find': find,
-           'watch': watch, 'unwatch': unwatch, 'daemon': daemon}
+ACTIONS = {'tag': tag, 'untag': untag, 'find': find, 'daemon': daemon}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=textwrap.dedent(DESC),
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--db', help='tag database path')
+    parser.add_argument('--debug', help='print debug messages to stderr', nargs='?')
     parser.add_argument('action', help='tag/untag/tags/find/watch/unwatch/daemon')
-    parser.add_argument('tags', help='quoted tags or expression for searching by tags')
-    parser.add_argument('files', help='files to perform the action on', nargs='*')
+    parser.add_argument('tags', help='quoted tags or expression for searching by tags', nargs='?', default='')
+    parser.add_argument('files', help='files to perform the action on', nargs='*', default=[])
     args = parser.parse_args()
+    debug_flag = args.debug
     db_path = args.db
 
     # Default database is a hidden file in user's home directory
