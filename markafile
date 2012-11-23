@@ -9,7 +9,6 @@ from os.path import isfile, isdir, abspath
 from os.path import join as path_join
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from textwrap import dedent
-from docutils.parsers.rst.directives import path
 
 DESC = '''
 markafile - all-in-one solution for file tagging
