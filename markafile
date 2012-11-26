@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import os
+import re
 import sys
 import signal
 import sqlite3
@@ -9,6 +10,7 @@ from os.path import isfile, isdir, abspath
 from os.path import join as path_join
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from textwrap import dedent
+from cherrypy._cpreqbody import Part
 
 DESC = '''
 markafile - all-in-one solution for file tagging
@@ -26,6 +28,7 @@ SETUP = '''CREATE TABLE IF NOT EXISTS TAG (
            );
 
            CREATE INDEX IF NOT EXISTS TAG_PATH ON TAG (PATH);
+           CREATE INDEX IF NOT EXISTS TAG_TAG ON TAG (TAG);
            CREATE INDEX IF NOT EXISTS TAG_BOTH ON TAG (PATH, TAG);
 
            CREATE INDEX IF NOT EXISTS WATCH_DIR ON WATCH (DIR);'''
@@ -78,10 +81,10 @@ def parsepath():
         elif isdir(path):
             if args.recursive:
                 for root, _, dir_files in walk(path):
-                    files.extend([path_join(root, single_file)
-                                  for single_file in dir_files])
+                    files += [path_join(root, single_file)
+                              for single_file in dir_files]
             else:
-                files.extend([path_join(path, x) for x in next(walk(path))[2]])
+                files += [path_join(path, x) for x in next(walk(path))[2]]
     return files
 
 
@@ -121,7 +124,7 @@ def untag():
 
 def find():
     global db, args
-    if not args.tags:
+    if not (args and args.tags):
         return
 
     cursor = db.cursor()
@@ -131,7 +134,43 @@ def find():
             rows = cursor.fetchall()
             if rows:
                 print(path + ': ' + ' '.join([row[0] for row in rows]))
+    else:
+        keywords = set(['and', 'not', 'or', '(', ')'])
+        parameters = []
 
+        # Split tags into keywords (and/or/not, etc) and parameters (tag name)
+        query_parts = []
+        for part in [part.strip() for part in re.split('[()\s]+', args.tags)]:
+            if not part:
+                continue
+            if part in keywords:
+                query_parts.append(part)
+            else:
+                query_parts.append('TAG = ?')
+                parameters.append(part)
+
+        # PATH IN condition
+        paths = parsepath()
+        parameters += paths
+        path_parts = ['?' for _ in paths]
+
+        # Construct the query and make path VS tags mapping
+        query = 'SELECT PATH, TAG FROM TAG '
+        query += 'WHERE (' + ' '.join(query_parts) + ') '
+        query += 'AND PATH IN (' + ', '.join(path_parts) + ')'
+        debug('Query: ' + query)
+        debug('Parameters: ' + str(parameters))
+
+        path_tags = {}
+        cursor.execute(query, parameters)
+        for path, tag in cursor.fetchall():
+            try:
+                path_tags[path].append(tag)
+            except KeyError:
+                path_tags[path] = [tag]
+
+        for path in path_tags:
+            print(path + ': ' + ' '.join(path_tags[path]))
 
 def daemon():
     global db
