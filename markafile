@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 import os
 import re
 import sys
@@ -6,11 +6,10 @@ import signal
 import sqlite3
 
 from os import walk
-from os.path import isfile, isdir, abspath
+from os.path import isfile, isdir, abspath, dirname
 from os.path import join as path_join
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from textwrap import dedent
-from cherrypy._cpreqbody import Part
 
 DESC = '''
 markafile - all-in-one solution for file tagging
@@ -19,6 +18,7 @@ markafile - all-in-one solution for file tagging
 SETUP = '''CREATE TABLE IF NOT EXISTS TAG (
              ID INTEGER PRIMARY KEY AUTOINCREMENT,
              PATH TEXT NOT NULL,
+             DIR TEXT NOT NULL,
              TAG TEXT NOT NULL
            );
 
@@ -29,6 +29,7 @@ SETUP = '''CREATE TABLE IF NOT EXISTS TAG (
 
            CREATE INDEX IF NOT EXISTS TAG_PATH ON TAG (PATH);
            CREATE INDEX IF NOT EXISTS TAG_TAG ON TAG (TAG);
+           CREATE INDEX IF NOT EXISTS TAG_DIR ON TAG (DIR);
            CREATE INDEX IF NOT EXISTS TAG_BOTH ON TAG (PATH, TAG);
 
            CREATE INDEX IF NOT EXISTS WATCH_DIR ON WATCH (DIR);'''
@@ -102,10 +103,11 @@ def tag():
             if cursor.fetchone()[0]:
                 debug('File "{0}" already has tag "{1}"'.format(path, tag))
             else:
-                new_tags.append((path, tag))
+                new_tags.append((path, dirname(path), tag))
                 debug('Add tag "{0}" to file "{1}"'.format(tag, path))
     cursor = db.cursor()
-    cursor.executemany('INSERT INTO TAG(PATH, TAG) VALUES (?, ?)', new_tags)
+    cursor.executemany('INSERT INTO TAG(PATH, DIR, TAG) VALUES (?, ?, ?)',
+                       new_tags)
     db.commit()
 
 
@@ -171,6 +173,7 @@ def find():
 
         for path in path_tags:
             print(path + ': ' + ' '.join(path_tags[path]))
+
 
 def daemon():
     global db
