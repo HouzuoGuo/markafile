@@ -6,7 +6,7 @@ import signal
 import sqlite3
 
 from os import walk
-from os.path import isfile, isdir, abspath, dirname
+from os.path import isfile, isdir, abspath, dirname, exists
 from os.path import join as path_join
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from textwrap import dedent
@@ -140,7 +140,7 @@ def find():
         keywords = set(['and', 'not', 'or', '(', ')'])
         parameters = []
 
-        # Split tags into keywords (and/or/not, etc) and parameters (tag name)
+        # Split search expression into operators and tag names
         query_parts = []
         for part in [part.strip() for part in re.split('[()\s]+', args.tags)]:
             if not part:
@@ -148,7 +148,8 @@ def find():
             if part in keywords:
                 query_parts.append(part)
             else:
-                query_parts.append('TAG = ?')
+                query_parts.append('? IN (SELECT T2.TAG FROM TAG T2 ' +
+                                   'WHERE T2.PATH = T1.PATH)')
                 parameters.append(part)
 
         # PATH IN condition
@@ -157,7 +158,7 @@ def find():
         path_parts = ['?' for _ in paths]
 
         # Construct the query and make path VS tags mapping
-        query = 'SELECT PATH, TAG FROM TAG '
+        query = 'SELECT T1.PATH, T1.TAG FROM TAG T1 '
         query += 'WHERE (' + ' '.join(query_parts) + ') '
         query += 'AND PATH IN (' + ', '.join(path_parts) + ')'
         debug('Query: ' + query)
@@ -166,17 +167,29 @@ def find():
         path_tags = {}
         cursor.execute(query, parameters)
         for path, tag in cursor.fetchall():
-            try:
-                path_tags[path].append(tag)
-            except KeyError:
-                path_tags[path] = [tag]
+            if exists(path):
+                try:
+                    path_tags[path].append(tag)
+                except KeyError:
+                    path_tags[path] = [tag]
+            else:
+                cursor.execute('DELETE FROM TAG WHERE PATH = ?', (path,))
 
         for path in path_tags:
             print(path + ': ' + ' '.join(path_tags[path]))
 
 
 def daemon():
-    global db
+    global db, args
+    try:
+        import pyinotify
+        wm = pyinotify.WatchManager()
+        mask = pyinotify.IN_CREATE | pyinotify.IN_DELETE | \
+        pyinotify.IN_DELETE_SELF | pyinotify.IN_MOVED_FROM | \
+        pyinotify.IN_MOVED_TO | pyinotify.IN_MOVE_SELF
+
+    except ImportError:
+        panic('Cannot import pyinotify - daemon depends on the module to run')
 
 ACTIONS = {'tag': tag, 'untag': untag, 'find': find, 'daemon': daemon}
 
