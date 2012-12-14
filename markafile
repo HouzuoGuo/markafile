@@ -6,7 +6,7 @@ import signal
 import sqlite3
 
 from os import walk
-from os.path import isfile, isdir, abspath, dirname, exists
+from os.path import isfile, isdir, abspath, exists
 from os.path import join as path_join
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from textwrap import dedent
@@ -18,21 +18,12 @@ markafile - all-in-one solution for file tagging
 SETUP = '''CREATE TABLE IF NOT EXISTS TAG (
              ID INTEGER PRIMARY KEY AUTOINCREMENT,
              PATH TEXT NOT NULL,
-             DIR TEXT NOT NULL,
              TAG TEXT NOT NULL
-           );
-
-           CREATE TABLE IF NOT EXISTS WATCH (
-             ID INTEGER PRIMARY KEY AUTOINCREMENT,
-             DIR TEXT NOT NULL
            );
 
            CREATE INDEX IF NOT EXISTS TAG_PATH ON TAG (PATH);
            CREATE INDEX IF NOT EXISTS TAG_TAG ON TAG (TAG);
-           CREATE INDEX IF NOT EXISTS TAG_DIR ON TAG (DIR);
-           CREATE INDEX IF NOT EXISTS TAG_BOTH ON TAG (PATH, TAG);
-
-           CREATE INDEX IF NOT EXISTS WATCH_DIR ON WATCH (DIR);'''
+           CREATE INDEX IF NOT EXISTS TAG_BOTH ON TAG (PATH, TAG);'''
 
 args, db = None, None
 
@@ -103,10 +94,10 @@ def tag():
             if cursor.fetchone()[0]:
                 debug('File "{0}" already has tag "{1}"'.format(path, tag))
             else:
-                new_tags.append((path, dirname(path), tag))
+                new_tags.append((path, tag))
                 debug('Add tag "{0}" to file "{1}"'.format(tag, path))
     cursor = db.cursor()
-    cursor.executemany('INSERT INTO TAG(PATH, DIR, TAG) VALUES (?, ?, ?)',
+    cursor.executemany('INSERT INTO TAG(PATH, TAG) VALUES (?, ?)',
                        new_tags)
     db.commit()
 
@@ -178,20 +169,7 @@ def find():
         for path in path_tags:
             print(path + ': ' + ' '.join(path_tags[path]))
 
-
-def daemon():
-    global db, args
-    try:
-        import pyinotify
-        wm = pyinotify.WatchManager()
-        mask = pyinotify.IN_CREATE | pyinotify.IN_DELETE | \
-        pyinotify.IN_DELETE_SELF | pyinotify.IN_MOVED_FROM | \
-        pyinotify.IN_MOVED_TO | pyinotify.IN_MOVE_SELF
-
-    except ImportError:
-        panic('Cannot import pyinotify - daemon depends on the module to run')
-
-ACTIONS = {'tag': tag, 'untag': untag, 'find': find, 'daemon': daemon}
+ACTIONS = {'tag': tag, 'untag': untag, 'find': find}
 
 if __name__ == '__main__':
     parser = ArgumentParser(description=dedent(DESC),
@@ -213,14 +191,10 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, disconnect)
 
     try:
-
-        # Execute specified action
         if args.action in ACTIONS:
             connect()
-
-            # Prepare tag database
-            setup()
-            ACTIONS[args.action]()
+            setup()  # Prepare tag database
+            ACTIONS[args.action]()  # Execute specified action
             disconnect()
             sys.exit(0)
         else:
@@ -228,5 +202,5 @@ if __name__ == '__main__':
             sys.exit(1)
     except sqlite3.Error as err:
         panic('Database error: ' + str(err))
-#    except Exception as err:
-#        panic('Exception: ' + str(err))
+    except Exception as err:
+        panic('Exception: ' + str(err))
