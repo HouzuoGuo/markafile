@@ -12,7 +12,34 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from textwrap import dedent
 
 DESC = '''
-markafile - all-in-one solution for file tagging
+NAME
+    markafile - file tagging for *nix operating systems
+
+DESCRIPTION
+    markafile is a file tagging utility for applying multiple tags to files in
+    file system, and later those files may be searched by tag names.
+
+    markafile uses SQLite database to store tags and tagged files, thus no
+    write access to the tagged files is required. However markafile will
+    require read/execute permission on tagged directories and read permission
+    on tagged files.
+
+EXAMPLES
+
+
+BUGS
+    Although search results are guaranteed to be valid, however moved/deleted
+    files are not tracked automatically - their associated tags will remain in
+    database and will be automatically cleared once the tags are searched for.
+
+AUTHOR
+    Howard Guo <guohouzuo@gmail.com>
+
+REPORTING BUGS
+    Please contact the author by Email for bug report and feedback.
+
+COPYRIGHT
+
 '''
 
 SETUP = '''CREATE TABLE IF NOT EXISTS TAG (
