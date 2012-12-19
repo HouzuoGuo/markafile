@@ -17,14 +17,46 @@ NAME
 
 DESCRIPTION
     markafile is a file tagging utility for applying multiple tags to files in
-    file system, and later those files may be searched by tag names.
+    file system, and later those files may be searched by a search expression.
 
     markafile uses SQLite database to store tags and tagged files, thus no
     write access to the tagged files is required. However markafile will
     require read/execute permission on tagged directories and read permission
     on tagged files.
 
+    Tag name is case in-sensitve and may not contain space(s). Any number of
+    tags may be applied to any file.
+
+    Should any error occur, markafile will exit with status 1 and print error
+    details to STDERR.
+
+SEARCH EXPRESSION LANGUAGE
+    Search expression is a mini-language consists of tag names, keywords and
+    parenthesis. The expression is translated into SQL query for execution.
+
+    TAG NAMES
+        Case in-sensitive names which were used to tag files
+    KEYWORDS
+        Logical operators "and", "or", "not"
+    PARANTHESIS
+        To elevate precedence of their enclosed expression
+
+    See also EXAMPLES.
+
 EXAMPLES
+    Apply multiple tags to files
+    markafile tag "cron script" /etc/cron.daily/* /etc/cron.hourly/*
+
+    Tag directory files (including sub-directories)
+    markafile tag "conf" /etc -r
+
+    Remove tags
+    markafile untag "conf" /etc -r
+
+    Show all tagged files and tags
+    markafile find "*" /etc/ -r
+
+
 
 
 BUGS
@@ -45,12 +77,13 @@ COPYRIGHT
 SETUP = '''CREATE TABLE IF NOT EXISTS TAG (
              ID INTEGER PRIMARY KEY AUTOINCREMENT,
              PATH TEXT NOT NULL,
-             TAG TEXT NOT NULL
+             TAG TEXT COLLATE NOCASE NOT NULL
            );
 
            CREATE INDEX IF NOT EXISTS TAG_PATH ON TAG (PATH);
-           CREATE INDEX IF NOT EXISTS TAG_TAG ON TAG (TAG);
-           CREATE INDEX IF NOT EXISTS TAG_BOTH ON TAG (PATH, TAG);'''
+           CREATE INDEX IF NOT EXISTS TAG_TAG ON TAG (TAG COLlATE NOCASE);
+           CREATE INDEX IF NOT EXISTS TAG_BOTH ON TAG
+           (PATH, TAG COLLATE NOCASE);'''
 
 args, db = None, None
 
@@ -170,31 +203,38 @@ def find():
                                    'WHERE T2.PATH = T1.PATH)')
                 parameters.append(part)
 
-        # PATH IN condition
         paths = parsepath()
-        parameters += paths
-        path_parts = ['?' for _ in paths]
 
-        # Construct the query and make path VS tags mapping
-        query = 'SELECT T1.PATH, T1.TAG FROM TAG T1 '
-        query += 'WHERE (' + ' '.join(query_parts) + ') '
-        query += 'AND PATH IN (' + ', '.join(path_parts) + ')'
-        debug('Query: ' + query)
-        debug('Parameters: ' + str(parameters))
+        # Avoid too many parameters
+        for i in range(0, len(paths), 500):
+            files = paths[i:i + 500]
+            path_parts = ['?' for _ in paths]
 
-        path_tags = {}
-        cursor.execute(query, parameters)
-        for path, tag in cursor.fetchall():
-            if exists(path):
-                try:
-                    path_tags[path].append(tag)
-                except KeyError:
-                    path_tags[path] = [tag]
-            else:
-                cursor.execute('DELETE FROM TAG WHERE PATH = ?', (path,))
+            # Construct the query
+            query = 'SELECT T1.PATH, T1.TAG FROM TAG T1 '
+            query += 'WHERE (' + ' '.join(query_parts) + ') '
+            query += 'AND PATH IN (' + ', '.join(path_parts) + ')'
+            debug('Query: ' + query)
+            debug('Parameters: ' + str(parameters))
 
-        for path in path_tags:
-            print(path + ': ' + ' '.join(path_tags[path]))
+            all_params = parameters
+            all_params += files
+
+            path_tags = {}
+            cursor.execute(query, all_params)
+
+            # Make path VS tags mapping
+            for path, tag in cursor.fetchall():
+                if exists(path):
+                    try:
+                        path_tags[path].append(tag)
+                    except KeyError:
+                        path_tags[path] = [tag]
+                else:
+                    cursor.execute('DELETE FROM TAG WHERE PATH = ?', (path,))
+
+            for path in path_tags:
+                print(path + ': ' + ' '.join(path_tags[path]))
 
 ACTIONS = {'tag': tag, 'untag': untag, 'find': find}
 
@@ -229,5 +269,3 @@ if __name__ == '__main__':
             sys.exit(1)
     except sqlite3.Error as err:
         panic('Database error: ' + str(err))
-    except Exception as err:
-        panic('Exception: ' + str(err))
