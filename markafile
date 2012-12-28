@@ -16,26 +16,32 @@ NAME
     markafile - file tagging for *nix operating systems
 
 DESCRIPTION
-    markafile is a file tagging utility for applying multiple tags to files in
-    file system, and later those files may be searched by a search expression.
+    markafile is a utility program for tagging files and searching files by
+    tags using a powerful search expression.
 
-    markafile uses SQLite database to store tags and tagged files, thus no
-    write access to the tagged files is required. However markafile will
-    require read/execute permission on tagged directories and read permission
-    on tagged files.
-
-    Tag name is case in-sensitve and may not contain space(s). Any number of
-    tags may be applied to any file.
+    Tags are case in-sensitive, may not contain space(s). Any number of tags
+    may be applied to any file. File tags are stored in an SQLite database.
 
     Should any error occur, markafile will exit with status 1 and print error
     details to STDERR.
 
+REQUIRED PERMISSIONS
+    markafile requires the following permissions:
+    - Read-Write permission on SQLite database file
+    - Read-Write permission on SQLite database file directory (1)
+    - Read-Execute permission on tagged directory (2)
+    - Read permission on tagged file
+
+    (1) markafile creates the database file if it does not exist.
+
+    (2) markafile tags directory files, it does not tag the directory itself.
+
 SEARCH EXPRESSION LANGUAGE
-    Search expression is a mini-language consists of tag names, keywords and
+    Search expression is a mini-language consists of tags, keywords and
     parenthesis. The expression is translated into SQL query for execution.
 
     TAG NAMES
-        Case in-sensitive names which were used to tag files
+        Case in-sensitive file tags
     KEYWORDS
         Logical operators "and", "or", "not"
     PARANTHESIS
@@ -44,19 +50,17 @@ SEARCH EXPRESSION LANGUAGE
     See also EXAMPLES.
 
 EXAMPLES
-    Apply multiple tags to files
-    markafile tag "cron script" /etc/cron.daily/* /etc/cron.hourly/*
+    Tag files
+    $ markafile tag "cron script" /etc/cron.daily/* /etc/cron.hourly/*
 
-    Tag directory files (including sub-directories)
-    markafile tag "conf" /etc -r
+    Tag directory files recursively
+    $ markafile tag "conf" /etc -r
 
     Remove tags
-    markafile untag "conf" /etc -r
+    $ markafile untag "script" /etc -r
 
     Show all tagged files and tags
-    markafile find "*" /etc/ -r
-
-
+    $ markafile find "*" /etc/ -r
 
 
 BUGS
@@ -90,11 +94,11 @@ args, db = None, None
 
 def debug(msg):
     if args and args.debug:
-        sys.stderr.write(msg + '\n')
+        sys.stderr.write(str(msg) + '\n')
 
 
 def panic(msg):
-    sys.stderr.write('ERROR: {0}\n'.format(msg))
+    sys.stderr.write('ERROR: {0}\n'.format(str(msg)))
     sys.exit(1)
 
 
@@ -177,12 +181,15 @@ def untag():
 
 def find():
     global db, args
-    if not (args and args.tags):
+
+    parsed_path = parsepath()
+
+    if not (args and args.tags and parsed_path):
         return
 
     cursor = db.cursor()
     if args.tags == '*':
-        for path in parsepath():
+        for path in parsed_path:
             cursor.execute('SELECT TAG FROM TAG WHERE PATH = ?', (path,))
             rows = cursor.fetchall()
             if rows:
@@ -192,33 +199,33 @@ def find():
         parameters = []
 
         # Split search expression into operators and tag names
-        query_parts = []
-        for part in [part.strip() for part in re.split('[()\s]+', args.tags)]:
-            if not part:
+        query_params = []
+        for thing in [a.strip() for a in re.split('[()\s]+', args.tags)]:
+            if not thing:
                 continue
-            if part in keywords:
-                query_parts.append(part)
+            if thing in keywords:
+                query_params.append(thing)
             else:
-                query_parts.append('? IN (SELECT T2.TAG FROM TAG T2 ' +
+                query_params.append('? IN (SELECT T2.TAG FROM TAG T2 ' +
                                    'WHERE T2.PATH = T1.PATH)')
-                parameters.append(part)
-
-        paths = parsepath()
+                parameters.append(thing)
 
         # Avoid too many parameters
-        for i in range(0, len(paths), 500):
-            files = paths[i:i + 500]
-            path_parts = ['?' for _ in paths]
+        for i in range(0, len(parsed_path), 500):
+            files = parsed_path[i:i + 500]
+            path_params = '?,' * len(files)
 
             # Construct the query
             query = 'SELECT T1.PATH, T1.TAG FROM TAG T1 '
-            query += 'WHERE (' + ' '.join(query_parts) + ') '
-            query += 'AND PATH IN (' + ', '.join(path_parts) + ')'
-            debug('Query: ' + query)
-            debug('Parameters: ' + str(parameters))
+            query += 'WHERE (' + ' '.join(query_params) + ') '
+            query += 'AND PATH IN (' + path_params[:-1] + ')'
 
-            all_params = parameters
+            all_params = []
+            all_params += parameters
             all_params += files
+
+            debug('Query: ' + query)
+            debug('Parameters: ' + str(all_params))
 
             path_tags = {}
             cursor.execute(query, all_params)
@@ -268,4 +275,4 @@ if __name__ == '__main__':
             parser.print_help()
             sys.exit(1)
     except sqlite3.Error as err:
-        panic('Database error: ' + str(err))
+        panic(err)
