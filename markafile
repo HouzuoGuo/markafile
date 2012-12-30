@@ -36,7 +36,33 @@ REQUIRED PERMISSIONS
 
     (2) markafile tags directory files, it does not tag the directory itself.
 
-SEARCH EXPRESSION LANGUAGE
+TAG FILES
+    To add tags to a file:
+    $ markafile tag "startup console conf" /etc/motd
+
+    To add tags to multiple files:
+    $ markafile tag "conf cron script" /etc/cron.daily /etc/cron.hourly
+
+    To add tags to directory files:
+    $ markafile tag "script" /etc/rc.d
+
+    To add tags to directory files (including sub-directories)
+    $ markafile tag "srv-conf conf" /etc/httpd /etc/ppp -r
+
+    File tag may not:
+    - be "and" "or" "not" "(" ")"
+    - contain space(s)
+    - contain asterisk(s)
+
+SEARCH FILES
+    To print all tagged files and tags under a directory:
+    $ markafile find "*" /etc/httpd
+
+    To print all tagged files and tags under a directory (including
+    sub-directories):
+    $ markafile find "*" /etc -r
+
+COMPLEX SEARCH
     Search expression is a mini-language consists of tags, keywords and
     parenthesis. The expression is translated into SQL query for execution.
 
@@ -47,21 +73,20 @@ SEARCH EXPRESSION LANGUAGE
     PARANTHESIS
         To elevate precedence of their enclosed expression
 
-    See also EXAMPLES.
+    Simple search expression example:
+    $ markafile find "srv-conf" /etc -r
 
-EXAMPLES
-    Tag files
-    $ markafile tag "cron script" /etc/cron.daily/* /etc/cron.hourly/*
+    Complex example:
+    $ markafile find "conf and srv-conf and not (cron or script)" /etc -r
 
-    Tag directory files recursively
-    $ markafile tag "conf" /etc -r
+REMOVE FILE TAGS
+    Use action "untag", specify search expression followed by tags to be
+    removed:
+    $ markafile untag "not (cron or script):srv-conf conf" /etc -r
 
-    Remove tags
-    $ markafile untag "script" /etc -r
-
-    Show all tagged files and tags
-    $ markafile find "*" /etc/ -r
-
+    If "*" follows the search expression, all tags will be cleared from search
+    result:
+    $ markafile untag "not (cron or script):*" /etc -r
 
 BUGS
     Although search results are guaranteed to be valid, however moved/deleted
@@ -163,44 +188,48 @@ def tag():
     cursor = db.cursor()
     cursor.executemany('INSERT INTO TAG(PATH, TAG) VALUES (?, ?)',
                        new_tags)
-    db.commit()
 
 
 def untag():
     global db, args
-    if not (args and args.tags):
-        return
+    (search_expression, to_remove) = args.tags.split(':')[:3]
+    result = find(search_expression)
+    if result:
+        cursor = db.cursor()
+        if to_remove == '*':
+            cursor.executemany('DELETE FROM TAG WHERE PATH = ?',
+                               [k for k in result])
+        else:
+            cursor.executemany('DELETE FROM TAG WHERE PATH = ? AND TAG = ?',
+                               [(k, tag) for k in result for tag in result[k]])
 
-    cursor = db.cursor()
-    cursor.executemany('DELETE FROM TAG WHERE PATH = ? AND TAG = ?',
-                       [(path, tag)
-                        for path in parsepath()
-                        for tag in args.tags.split()])
-    db.commit()
 
-
-def find():
-    global db, args
+def find(tags):
+    global db
 
     parsed_path = parsepath()
+    path_tags = {}  # path - tags mapping to return
 
-    if not (args and args.tags and parsed_path):
+    if not (args and tags and parsed_path):
         return
 
     cursor = db.cursor()
-    if args.tags == '*':
+    if tags == '*':
         for path in parsed_path:
             cursor.execute('SELECT TAG FROM TAG WHERE PATH = ?', (path,))
             rows = cursor.fetchall()
             if rows:
-                print(path + ': ' + ' '.join([row[0] for row in rows]))
+                try:
+                    path_tags[path].append(row[0] for row in rows)
+                except KeyError:
+                    path_tags[path] = [row[0] for row in rows]
     else:
         keywords = set(['and', 'not', 'or', '(', ')'])
         parameters = []
 
-        # Split search expression into operators and tag names
+        # Split search expression into keywords and tags
         query_params = []
-        for thing in [a.strip() for a in re.split('[()\s]+', args.tags)]:
+        for thing in [a.strip() for a in re.split('[()\s]+', tags)]:
             if not thing:
                 continue
             if thing in keywords:
@@ -210,7 +239,7 @@ def find():
                                    'WHERE T2.PATH = T1.PATH)')
                 parameters.append(thing)
 
-        # Avoid too many parameters
+        # Avoid "too many parameters" SQLite error
         for i in range(0, len(parsed_path), 500):
             files = parsed_path[i:i + 500]
             path_params = '?,' * len(files)
@@ -224,10 +253,10 @@ def find():
             all_params += parameters
             all_params += files
 
+            debug('Query params: ' + str(query_params))
             debug('Query: ' + query)
             debug('Parameters: ' + str(all_params))
 
-            path_tags = {}
             cursor.execute(query, all_params)
 
             # Make path VS tags mapping
@@ -239,21 +268,26 @@ def find():
                         path_tags[path] = [tag]
                 else:
                     cursor.execute('DELETE FROM TAG WHERE PATH = ?', (path,))
+    return path_tags
 
-            for path in path_tags:
-                print(path + ': ' + ' '.join(path_tags[path]))
 
-ACTIONS = {'tag': tag, 'untag': untag, 'find': find}
+def cli_find():
+    global args
+    result = find(args.tags)
+    for path in result:
+        print(path + ':' + ' '.join(result[path]))
+
+ACTIONS = {'tag': tag, 'untag': untag, 'find': cli_find}
 
 if __name__ == '__main__':
     parser = ArgumentParser(description=dedent(DESC),
                             formatter_class=RawDescriptionHelpFormatter)
     parser.add_argument('--db', help='user specified database path')
     parser.add_argument('-r', action='store_true', dest='recursive',
-                        help='tag/untag including sub-directories')
+                        help='tag/untag/find including sub-directories')
     parser.add_argument('--debug', action='store_true', dest='debug',
                         help='print debug messages to stderr')
-    parser.add_argument('action', help='tag/untag/find/daemon')
+    parser.add_argument('action', help='tag/untag/find')
     parser.add_argument('tags', nargs='?',
                         help='tags or search expression (in quotes)')
     parser.add_argument('files', help='list of files', nargs='*')
