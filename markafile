@@ -189,7 +189,10 @@ def parsepath():
                     files += [path_join(root, single_file)
                               for single_file in dir_files]
             else:
-                files += [path_join(path, x) for x in next(walk(path))[2]]
+                try:
+                    files += [path_join(path, x) for x in next(walk(path))[2]]
+                except StopIteration:
+                    pass
     return files
 
 
