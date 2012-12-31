@@ -78,9 +78,9 @@
         $ markafile untag "*:*" /etc -r
 
     BUGS
-        Although search results are guaranteed to be valid, however moved/deleted
-        files are not tracked automatically - their associated tags will remain in
-        database and will be automatically cleared once the tags are searched for.
+        When tagged files are moved/deleted, their original paths will remain in
+        database thus causing incorrect path-tag associations. However, search
+        results are guaranteed to only return results of correct and valid paths.
 
     AUTHOR
         Howard Guo <guohouzuo@gmail.com>
