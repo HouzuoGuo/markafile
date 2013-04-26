@@ -77,6 +77,21 @@
         To remove all tags from all files:
         $ markafile untag "*:*" /etc -r
 
+    ENVIRONMENT VARIABLE
+        Variable MARKAFILE_RELPATH may be set to absolute path to a directory, this
+        will change the behaviour of markafile.
+
+        If env variable 'MARKAFILE_RELPATH' is set:
+          - relative path will be calculated and stored with tags
+          - query will calculate relative path and search them in tag database
+
+        For example, first MARKAFILE_RELPATH is set to "/home/howard":
+          - Apply tag "code" to "/home/howard/f.py" will tag "code" to "f.py".
+        Then, the database /home/howard/.markafile.sqlite3 is moved to ~belle:
+          - Set MARKAFILE_RELPATH to "/home/belle"
+          - If belle has "f.py" in her home directory, query "code" in ~belle will
+          return the file "f.py"
+
     BUGS
         When tagged files are moved/deleted, their original paths will remain in
         database thus causing incorrect path-tag associations. However, search
@@ -89,17 +104,17 @@
         Please contact the author by Email for bug report and feedback.
 
     COPYRIGHT
-        Copyright (c) 2012 Howard Guo
+        Copyright (c) 2013 Howard Guo
         All rights reserved.
 
         Redistribution and use in source and binary forms, with or without
         modification, are permitted provided that the following conditions are met:
 
         1. Redistributions of source code must retain the above copyright notice,
-          this list of conditions and the following disclaimer.
+           this list of conditions and the following disclaimer.
         2. Redistributions in binary form must reproduce the above copyright
-          notice, this list of conditions and the following disclaimer in the
-          documentation and/or other materials provided with the distribution.
+           notice, this list of conditions and the following disclaimer in the
+           documentation and/or other materials provided with the distribution.
 
         THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
         AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
